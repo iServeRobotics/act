@@ -64,6 +64,8 @@ def get_args_parser():
     parser.add_argument('--chunk_size', action='store', type=int, help='chunk_size', required=False)
     parser.add_argument('--temporal_agg', action='store_true')
 
+    parser.add_argument('--realrobot', action='store_true')
+
     return parser
 
 
@@ -76,6 +78,19 @@ def build_ACT_model_and_optimizer(args_override):
 
     model = build_ACT_model(args)
     model.cuda()
+
+    # print(model)
+    # dummy_image = torch.randn(1, 1, 3, 480, 640).cuda()
+    # dummy_qpos = torch.randn(1, 14).cuda()
+    # output, _, (_, _) = model(dummy_qpos, dummy_image, None)
+    # print(f"Output : {output.shape}")  # Should be (1, 100, 14)
+    # print(output)
+    # # Print all model parameters
+    # print("Model Parameters:")
+    # for name, param in model.named_parameters():
+    #     print(f"{name}: {param.size()}, requires_grad={param.requires_grad}")
+    # print(list(model.children())[-1])  # Prints the last module/layer
+
 
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
@@ -99,6 +114,17 @@ def build_CNNMLP_model_and_optimizer(args_override):
 
     model = build_CNNMLP_model(args)
     model.cuda()
+
+    # print(model)
+    # # Print all model parameters
+    # print("Model Parameters:")
+    # for name, param in model.named_parameters():
+    #     print(f"{name}: {param.size()}, requires_grad={param.requires_grad}")
+
+    # print(list(model.children())[-1])  # Prints the last module/layer
+    # for name, module in list(model.children())[-1].named_children():
+    #     print(name, "->", module)
+
 
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},

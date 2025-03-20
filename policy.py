@@ -1,6 +1,7 @@
 import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
+import numpy as np
 
 from detr.main import build_ACT_model_and_optimizer, build_CNNMLP_model_and_optimizer
 import IPython
@@ -20,6 +21,8 @@ class ACTPolicy(nn.Module):
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
+        print(f"action size: {np.shape(actions)}")
+
         if actions is not None: # training time
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]
@@ -53,9 +56,13 @@ class CNNMLPPolicy(nn.Module):
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
+        print(f"action size: {np.shape(actions)}")
+        print(f"selected action:  {np.shape(actions[:, :100].view(actions.shape[0], -1))}")
         if actions is not None: # training time
-            actions = actions[:, 0]
+            # actions = actions[:, 0]
+            actions = actions[:, :100].view(actions.shape[0], -1) 
             a_hat = self.model(qpos, image, env_state, actions)
+            print(f"a_hat shape: {np.shape(a_hat)}")
             mse = F.mse_loss(actions, a_hat)
             loss_dict = dict()
             loss_dict['mse'] = mse
