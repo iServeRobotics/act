@@ -54,8 +54,11 @@ class CNNMLPPolicy(nn.Module):
                                          std=[0.229, 0.224, 0.225])
         image = normalize(image)
         if actions is not None: # training time
-            actions = actions[:, 0]
+            actions = actions[:, :self.model.num_queries]
+            print(f"action : {actions.shape}, {self.model.num_queries}")
             a_hat = self.model(qpos, image, env_state, actions)
+            d1 = a_hat.shape
+            a_hat = a_hat.view(d1[0],self.model.num_queries,-1)
             mse = F.mse_loss(actions, a_hat)
             loss_dict = dict()
             loss_dict['mse'] = mse

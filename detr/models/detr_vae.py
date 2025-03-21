@@ -141,7 +141,7 @@ class DETRVAE(nn.Module):
 
 
 class CNNMLP(nn.Module):
-    def __init__(self, backbones, state_dim, camera_names):
+    def __init__(self, backbones, state_dim, num_queries, camera_names):
         """ Initializes the model.
         Parameters:
             backbones: torch module of the backbone to be used. See backbone.py
@@ -153,6 +153,7 @@ class CNNMLP(nn.Module):
         """
         super().__init__()
         self.camera_names = camera_names
+        self.num_queries = num_queries
         self.action_head = nn.Linear(1000, state_dim) # TODO add more
         if backbones is not None:
             self.backbones = nn.ModuleList(backbones)
@@ -167,7 +168,7 @@ class CNNMLP(nn.Module):
             self.backbone_down_projs = nn.ModuleList(backbone_down_projs)
 
             mlp_in_dim = 768 * len(backbones) + 14
-            self.mlp = mlp(input_dim=mlp_in_dim, hidden_dim=1024, output_dim=14, hidden_depth=2)
+            self.mlp = mlp(input_dim=mlp_in_dim, hidden_dim=1024, output_dim=num_queries*14, hidden_depth=2)
         else:
             raise NotImplementedError
 
@@ -268,6 +269,7 @@ def build_cnnmlp(args):
     model = CNNMLP(
         backbones,
         state_dim=state_dim,
+        num_queries=args.num_queries,
         camera_names=args.camera_names,
     )
 
