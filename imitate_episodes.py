@@ -3,6 +3,7 @@ import numpy as np
 import os
 import pickle
 import argparse
+import cv2
 import matplotlib.pyplot as plt
 from copy import deepcopy
 from tqdm import tqdm
@@ -32,6 +33,9 @@ def main(args):
     batch_size_train = args['batch_size']
     batch_size_val = args['batch_size']
     num_epochs = args['num_epochs']
+    use_camera = args['use_camera']
+
+    print(use_camera)
 
     # get task parameters
     is_sim = task_name[:4] == 'sim_'
@@ -85,14 +89,35 @@ def main(args):
         'seed': args['seed'],
         'temporal_agg': args['temporal_agg'],
         'camera_names': camera_names,
-        'real_robot': not is_sim
+        'real_robot': not is_sim,
+        'use_camera': use_camera
     }
+
+    if use_camera:
+        # Initialize the webcam
+        cap = cv2.VideoCapture("./video4.mp4")
+
+        # Check if the webcam is opened successfully
+        if not cap.isOpened():
+            raise IOError("Cannot open webcam")
+        # Read a frame from the webcam
+        ret, frame = cap.read()
+
+        # Check if the frame was read successfully
+        if not ret:
+            raise IOError("Cannot read frame")
+
+        # # Display the captured frame
+        # cv2.imshow('Webcam Image', frame)
+
+        # # Save the captured frame to a file
+        # cv2.imwrite('captured_image.jpg', frame)
 
     if is_eval:
         ckpt_names = [f'policy_best.ckpt']
         results = []
         for ckpt_name in ckpt_names:
-            success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
+            success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True, cap=cap)
             results.append([ckpt_name, success_rate, avg_return])
 
         for ckpt_name, success_rate, avg_return in results:
@@ -138,7 +163,13 @@ def make_optimizer(policy_class, policy):
     return optimizer
 
 
-def get_image(ts, camera_names):
+def get_image(ts, camera_names, use_camera, cap):
+    if use_camera and cap:
+        ret, frame = cap.read()
+        if not ret:
+            raise IOError("Cannot read frame")
+        return torch.from_numpy(frame / 255.0).float().cuda().unsqueeze(0)
+
     curr_images = []
     for cam_name in camera_names:
         curr_image = rearrange(ts.observation['images'][cam_name], 'h w c -> c h w')
@@ -148,7 +179,7 @@ def get_image(ts, camera_names):
     return curr_image
 
 
-def eval_bc(config, ckpt_name, save_episode=True):
+def eval_bc(config, ckpt_name, save_episode=True, cap=None):
     set_seed(1000)
     ckpt_dir = config['ckpt_dir']
     state_dim = config['state_dim']
@@ -157,6 +188,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
     onscreen_render = config['onscreen_render']
     policy_config = config['policy_config']
     camera_names = config['camera_names']
+    use_camera = config['use_camera']
     max_timesteps = config['episode_len']
     task_name = config['task_name']
     temporal_agg = config['temporal_agg']
@@ -224,7 +256,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         target_qpos_list = []
         rewards = []
         with torch.inference_mode():
-            for t in range(max_timesteps):
+            for t in range(max_timesteps): # for every frame from 400
                 ### update onscreen render and wait for DT
                 if onscreen_render:
                     image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
@@ -237,15 +269,15 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     image_list.append(obs['images'])
                 else:
                     image_list.append({'main': obs['image']})
-                qpos_numpy = np.array(obs['qpos'])
+                qpos_numpy = np.array(obs['qpos']) # Fill with 1x16 (?) random value
                 qpos = pre_process(qpos_numpy)
                 qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
                 qpos_history[:, t] = qpos
-                curr_image = get_image(ts, camera_names)
+                curr_image = get_image(ts, camera_names, use_camera, cap)
 
                 ### query policy
                 if config['policy_class'] == "ACT":
-                    if t % query_frequency == 0:
+                    if t % query_frequency == 0: # every 100 frames
                         all_actions = policy(qpos, curr_image)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions
@@ -416,6 +448,7 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--use_camera', action='store_true')
     parser.add_argument('--onscreen_render', action='store_true')
     parser.add_argument('--ckpt_dir', action='store', type=str, help='ckpt_dir', required=True)
     parser.add_argument('--policy_class', action='store', type=str, help='policy_class, capitalize', required=True)
