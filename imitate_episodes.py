@@ -93,6 +93,7 @@ def main(args):
         'use_camera': use_camera
     }
 
+    cap = None
     if use_camera:
         # Initialize the webcam
         cap = cv2.VideoCapture("./video4.mp4")
@@ -165,10 +166,17 @@ def make_optimizer(policy_class, policy):
 
 def get_image(ts, camera_names, use_camera, cap):
     if use_camera and cap:
-        ret, frame = cap.read()
+        ret, curr_image = cap.read()
         if not ret:
             raise IOError("Cannot read frame")
-        return torch.from_numpy(frame / 255.0).float().cuda().unsqueeze(0)
+
+        curr_image = cv2.resize(curr_image, (640, 480))
+        curr_image = rearrange(curr_image, 'h w c -> c h w')
+        curr_images = [curr_image]
+        curr_image = np.stack(curr_images, axis=0)
+        curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
+        print(curr_image.shape) # expect torch.Size([1, 1, 3, 480, 640])
+        return curr_image
 
     curr_images = []
     for cam_name in camera_names:
@@ -176,6 +184,8 @@ def get_image(ts, camera_names, use_camera, cap):
         curr_images.append(curr_image)
     curr_image = np.stack(curr_images, axis=0)
     curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
+    print(curr_image.shape) # expect torch.Size([1, 1, 3, 480, 640])
+    
     return curr_image
 
 
