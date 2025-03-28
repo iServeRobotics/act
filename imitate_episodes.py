@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 from tqdm import tqdm
 from einops import rearrange
+from torch.cuda.amp import GradScaler, autocast
 
 from constants import DT
 from constants import PUPPET_GRIPPER_JOINT_OPEN
@@ -125,6 +126,7 @@ def make_policy(policy_class, policy_config):
         policy = CNNMLPPolicy(policy_config)
     else:
         raise NotImplementedError
+    # policy = policy.half()
     return policy
 
 
@@ -144,7 +146,7 @@ def get_image(ts, camera_names):
         curr_image = rearrange(ts.observation['images'][cam_name], 'h w c -> c h w')
         curr_images.append(curr_image)
     curr_image = np.stack(curr_images, axis=0)
-    curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
+    curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().half().unsqueeze(0)
     return curr_image
 
 
@@ -316,6 +318,17 @@ def eval_bc(config, ckpt_name, save_episode=True):
 def forward_pass(data, policy):
     image_data, qpos_data, action_data, is_pad = data
     image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
+    # Cast all data to FP16
+    # image_data = image_data.cuda().half()  # Convert image data to FP16
+    # qpos_data = qpos_data.cuda().half()    # Convert qpos data to FP16
+    # action_data = action_data.cuda().half()  # Convert action data to FP16
+    # is_pad = is_pad.cuda()  # Keep is_pad as it is (likely boolean/int)
+    # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
+    # print("forward")
+    # print(image_data.dtype)  # Should print torch.float16
+    # print(qpos_data.dtype)   # Should print torch.float16
+    # print(action_data.dtype) # Should print torch.float16
+    # print("forward")
     return policy(qpos_data, image_data, action_data, is_pad) # TODO remove None
 
 
@@ -331,6 +344,11 @@ def train_bc(train_dataloader, val_dataloader, config):
     policy = make_policy(policy_class, policy_config)
     policy.cuda()
     optimizer = make_optimizer(policy_class, policy)
+    # print("Optimizer parameter dtypes:")
+    # for param_group in optimizer.param_groups:
+    #     for param in param_group['params']:
+    #         print(param.dtype)
+    scaler = GradScaler()
 
     train_history = []
     validation_history = []
@@ -362,13 +380,26 @@ def train_bc(train_dataloader, val_dataloader, config):
         policy.train()
         optimizer.zero_grad()
         for batch_idx, data in enumerate(train_dataloader):
-            forward_dict = forward_pass(data, policy)
+            with autocast():
+                forward_dict = forward_pass(data, policy)
+                loss = forward_dict['loss']
+
+            # Debugging: Check for NaN or invalid loss
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"Invalid loss detected at batch {batch_idx}: {loss}")
+                continue  # Skip this batch
+
+            # Debugging: Print data types and loss
+            # print(f"Loss: {loss}, {loss.dtype}")
+            # print(f"Model parameter dtype: {next(policy.parameters()).dtype}")
+
             # backward
-            loss = forward_dict['loss']
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
+            # print("finished one training iteration")
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
         epoch_train_loss = epoch_summary['loss']
         print(f'Train loss: {epoch_train_loss:.5f}')
@@ -381,6 +412,13 @@ def train_bc(train_dataloader, val_dataloader, config):
             ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{epoch}_seed_{seed}.ckpt')
             torch.save(policy.state_dict(), ckpt_path)
             plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
+
+            # Save the last checkpoint in FP16
+            ckpt_path_fp16 = os.path.join(ckpt_dir, f'policy_epoch_{epoch}_seed_{seed}_fp16.ckpt')
+            policy_fp16 = deepcopy(policy)  # Create a copy of the policy
+            policy_fp16.half()  # Convert the copy to FP16
+            torch.save(policy_fp16.state_dict(), ckpt_path_fp16)
+            print(f'Last FP16 checkpoint saved at: {ckpt_path_fp16}')
 
     ckpt_path = os.path.join(ckpt_dir, f'policy_last.ckpt')
     torch.save(policy.state_dict(), ckpt_path)
