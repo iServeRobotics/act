@@ -90,7 +90,8 @@ def main(args):
     }
 
     if is_eval:
-        ckpt_names = [f'policy_best.ckpt']
+        # ckpt_names = [f'policy_best.ckpt']
+        ckpt_names = [f'policy_epoch_4900_seed_0_fp16.ckpt']
         results = []
         for ckpt_name in ckpt_names:
             success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
@@ -115,6 +116,7 @@ def main(args):
 
     # save best checkpoint
     ckpt_path = os.path.join(ckpt_dir, f'policy_best.ckpt')
+    
     torch.save(best_state_dict, ckpt_path)
     print(f'Best ckpt, val loss {min_val_loss:.6f} @ epoch{best_epoch}')
 
@@ -248,7 +250,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 ### query policy
                 if config['policy_class'] == "ACT":
                     if t % query_frequency == 0:
-                        all_actions = policy(qpos, curr_image)
+                        with autocast():
+                            all_actions = policy(qpos.half(), curr_image)
                     if temporal_agg:
                         all_time_actions[[t], t:t+num_queries] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
@@ -322,7 +325,7 @@ def forward_pass(data, policy):
     # image_data = image_data.cuda().half()  # Convert image data to FP16
     # qpos_data = qpos_data.cuda().half()    # Convert qpos data to FP16
     # action_data = action_data.cuda().half()  # Convert action data to FP16
-    # is_pad = is_pad.cuda()  # Keep is_pad as it is (likely boolean/int)
+    # is_pad = is_pad.cuda().half()  # Keep is_pad as it is (likely boolean/int)
     # image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
     # print("forward")
     # print(image_data.dtype)  # Should print torch.float16
@@ -399,7 +402,6 @@ def train_bc(train_dataloader, val_dataloader, config):
             scaler.update()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
-            # print("finished one training iteration")
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*epoch:(batch_idx+1)*(epoch+1)])
         epoch_train_loss = epoch_summary['loss']
         print(f'Train loss: {epoch_train_loss:.5f}')
